@@ -1,0 +1,26 @@
+name: OIDC Smoketest
+on: { workflow_dispatch: {} }
+
+permissions:
+  id-token: write   # REQUIRED for OIDC
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Who am I? (proof OIDC works)
+        run: aws sts get-caller-identity
+
+      - name: Optional: list buckets (harmless read)
+        run: aws s3 ls || true

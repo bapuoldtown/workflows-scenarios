@@ -1,0 +1,64 @@
+name: Provision S3 Bucket (IAM Keys)
+on:
+  workflow_dispatch:
+    inputs:
+      bucket_name:
+        description: "Globally-unique bucket (e.g., guru-poc-xyz123)"
+        required: true
+      region:
+        description: "AWS region"
+        required: true
+        default: "ap-south-1"
+
+permissions: { contents: read }
+env: { AWS_REGION: ${{ inputs.region }} }
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Create if missing
+        shell: bash
+        run: |
+          set -euo pipefail
+          B="${{ inputs.bucket_name }}"; R="${{ inputs.region }}"
+          if aws s3api head-bucket --bucket "$B" 2>/dev/null; then
+            echo "Bucket exists."
+          else
+            if [ "$R" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "$B"
+            else
+              aws s3api create-bucket --bucket "$B" \
+                --create-bucket-configuration LocationConstraint="$R"
+            fi
+            echo "Created $B"
+          fi
+
+      - name: Block public access
+        run: |
+          aws s3api put-public-access-block --bucket "${{ inputs.bucket_name }}" \
+            --public-access-block-configuration \
+            BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+      - name: Enable default encryption (SSE-S3) + Versioning
+        run: |
+          aws s3api put-bucket-encryption --bucket "${{ inputs.bucket_name }}" \
+            --server-side-encryption-configuration '{
+              "Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]
+            }'
+          aws s3api put-bucket-versioning --bucket "${{ inputs.bucket_name }}" \
+            --versioning-configuration Status=Enabled
+
+      - name: Show config
+        run: |
+          aws s3api get-bucket-encryption --bucket "${{ inputs.bucket_name }}" || true
+          aws s3api get-bucket-versioning --bucket "${{ inputs.bucket_name }}" || true
+          aws s3api get-public-access-block --bucket "${{ inputs.bucket_name }}" || true
